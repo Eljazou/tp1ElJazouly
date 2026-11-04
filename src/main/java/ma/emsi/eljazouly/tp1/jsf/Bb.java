@@ -1,7 +1,8 @@
 package ma.emsi.eljazouly.tp1.jsf;
 
 
-import ma.emsi.eljazouly.tp1.service.GenerateurReponse;
+import ma.emsi.eljazouly.tp1.llm.JsonAdapterPourGemini;
+import ma.emsi.eljazouly.tp1.llm.LlmInteraction;
 import jakarta.faces.application.FacesMessage;
 import jakarta.faces.context.FacesContext;
 import jakarta.faces.model.SelectItem;
@@ -11,6 +12,7 @@ import jakarta.inject.Named;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -53,10 +55,23 @@ public class Bb implements Serializable {
     private StringBuilder conversation = new StringBuilder();
 
     /**
-     * Service pour modifier la question et générer la réponse.
+     * Mode debug : si true, la page affiche le JSON des requêtes et des réponses échangées avec le LLM.
+     */
+    private boolean debug;
+    /**
+     * JSON de la dernière requête envoyée à l'API du LLM (affiché en mode debug).
+     */
+    private String texteRequeteJson;
+    /**
+     * JSON de la dernière réponse de l'API du LLM (affiché en mode debug).
+     */
+    private String texteReponseJson;
+
+    /**
+     * Prépare le JSON des requêtes à l'API de Gemini, les envoie et extrait les réponses.
      */
     @Inject
-    private GenerateurReponse generateurReponse;
+    private JsonAdapterPourGemini jsonAdapter;
 
     /**
      * Contexte JSF. Utilisé pour qu'un message d'erreur s'affiche dans le formulaire.
@@ -111,11 +126,33 @@ public class Bb implements Serializable {
         this.conversation = new StringBuilder(conversation);
     }
 
+    public boolean isDebug() {
+        return this.debug;
+    }
+
+    public void setDebug(boolean debug) {
+        this.debug = debug;
+    }
+
+    public String getTexteRequeteJson() {
+        return this.texteRequeteJson;
+    }
+
+    public void setTexteRequeteJson(String texteRequeteJson) {
+        this.texteRequeteJson = texteRequeteJson;
+    }
+
+    public String getTexteReponseJson() {
+        return this.texteReponseJson;
+    }
+
+    public void setTexteReponseJson(String texteReponseJson) {
+        this.texteReponseJson = texteReponseJson;
+    }
+
     /**
-     * Envoie la question au serveur.
-     * En attendant de l'envoyer à un LLM, le serveur fait un traitement quelconque, juste pour tester :
-     * Le traitement consiste à copier la question en minuscules et à l'entourer avec "||". Le rôle système
-     * est ajouté au début de la première réponse.
+     * Envoie la question à l'API du LLM (Gemini) et récupère sa réponse.
+     * Au début de la conversation, le rôle système est d'abord transmis à jsonAdapter.
      *
      * @return null pour rester sur la même page.
      */
@@ -130,11 +167,25 @@ public class Bb implements Serializable {
         
         // Traite la question pour construire la réponse.
         if (this.conversation.isEmpty()) { // Si la conversation n'a pas encore commencé
+            // Envoie le rôle système à jsonAdapter : il sera mis dans la première requête au LLM.
+            this.jsonAdapter.setSystemRole(this.roleSysteme);
             // Fige la liste déroulante qui permet de choisir le rôle système
             this.roleSystemeChangeable = false;
         }
-        this.reponse = this.generateurReponse.genererReponse(this.question, this.roleSysteme);
-        
+        try {
+            LlmInteraction interaction = jsonAdapter.envoyerRequete(question);
+            this.reponse = interaction.reponseExtraite();
+            this.texteRequeteJson = interaction.questionJson();
+            this.texteReponseJson = interaction.reponseJson();
+        } catch (Exception e) {
+            this.reponse = "Erreur : " + e.getMessage();
+            FacesMessage message =
+                    new FacesMessage(FacesMessage.SEVERITY_ERROR,
+                            "Problème de connexion avec l'API du LLM",
+                            "Problème de connexion avec l'API du LLM" + e.getMessage() + "\n" + Arrays.toString(e.getStackTrace()));
+            facesContext.addMessage(null, message);
+        }
+
         // La conversation contient l'historique des questions-réponses depuis le début.
         afficherConversation();
         return null;
